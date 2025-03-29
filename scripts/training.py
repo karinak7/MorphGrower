@@ -9,6 +9,7 @@ def train_conditional_one_epoch(
     model = model.train()
     epoch_recon_loss, epoch_reg_loss, Nnum = 0, 0, 0
     for data in tqdm(dataloader):
+        #prefix = [B, W, L, 3] batches of prefix branches 
         prefix, target_l, target_r, window_len, seq_len, target_seq_len, node, offset, edge = data
         prefix, target_l, target_r, node, offset, edge = prefix.to(device), target_l.to(device), target_r.to(device), node.to(device), offset.to(device), edge.to(device)
         output_l, output_r, h, Z = model(prefix,seq_len,window_len,target_l,target_r,target_seq_len,node,offset,edge,teacher_force=teaching)

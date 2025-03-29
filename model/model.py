@@ -34,7 +34,7 @@ class ConditionalSeqEncoder(torch.nn.Module):
         super(ConditionalSeqEncoder, self).__init__()
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
-        self.n_layers = n_layers
+        self.n_layers = n_layers #2 by default
         self.embedding_dim = embedding_dim
         self.coordinate2emb = torch.nn.Linear(input_dim, embedding_dim)
         self.dropout_fun = torch.nn.Dropout(dropout)
@@ -43,10 +43,25 @@ class ConditionalSeqEncoder(torch.nn.Module):
         )
 
     def forward(self, src, seq_len):
+        """
+        src: 
+        [[[b1_p0_x, b1_p0_y, b1_p0_z], [b2_p0_x, b2_p0_y, b2_p0_z],[b3_p0_x, b3_p0_y, b3_p0_z], ...], 
+            [point 2 on all prefix branches ], 
+            [point 3 on all prefix branches], ...]
+         each column is a branch, each row is a timestep.
+         By default: pytorch lstm takes column as the batch dim (dim=1), dim=0 as the sequence length dim 
+
+        hidden:
+        [[[hidden cell for branch1], [hidden cell for branch 2], ...], [[hidden cell2 for branch1], ...]]
+        """
         input_seq = self.dropout_fun(self.coordinate2emb(src))
+        #input_seq: [seq_len, batch_size, embedding_dim=hidden_dim] #seq_len = number points on a branch L = 32
         packed_seq = pack_padded_sequence(
             input_seq, seq_len, enforce_sorted=False
         )
+        #seq_len: Each value tells the actual number of valid timesteps for each branch
+        #packed_seq: give LSTM a batch seqs, and tells it their real length before padding so lstm can handle efficiently
+        #seq len corresponds to length of each column in input_seq which represents a branch 
         packed_output, (hidden, cell) = self.rnn(packed_seq)
 
         # outputs = [seq len, batch size, hid dim * n directions]
@@ -110,6 +125,7 @@ def conditional_decode_seq(
     return outputs
 
 class ConditionEncoder(torch.nn.Module):
+    #path encoding (local info): use LSTM instead of EMA in paper
     def __init__(self, branch_encoder, hidden_dim, n_layers=2, dropout=0.5):
         super(ConditionEncoder, self).__init__()
         self.branch_encoder = branch_encoder
@@ -120,15 +136,15 @@ class ConditionEncoder(torch.nn.Module):
         self.hidden_dim, self.n_layers = hidden_dim, n_layers
 
     def forward(self, prefix, seq_len, window_len):
-        # prefix = [bs, window len, seq_len, data_dim]
+        # prefix = [bs, window len, seq_len, data_dim] -> batch of branch sequences 
         # seq_len = [bs, window len]
         # window_len = [bs]
         bs, wind_l, seq_l, input_dim = prefix.shape
-        all_seq_len, all_seq = [], []
+        all_seq_len, all_seq = [], [] #all_seq_len = len of each seq = # branches per seq
         for idx, t in enumerate(window_len):
             all_seq_len.extend(seq_len[idx][:t])
             all_seq.append(prefix[idx][:t])
-        all_seq = torch.cat(all_seq, dim=0).permute(1, 0, 2)
+        all_seq = torch.cat(all_seq, dim=0).permute(1, 0, 2) # [seq_len, batch_size, input_dim]
         # print('[info] seq_shape', all_seq.shape, sum(window_len))
 
         h_branch, c_branch = self.branch_encoder(all_seq, all_seq_len)
@@ -242,41 +258,61 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
 
     def forward(self, prefix, seq_len, window_len, target_l, target_r, target_seq_len, node, offset, edge,
                 teacher_force=0.5, need_gauss=False):
+        """
+        Each sample in the batch corresponds to one training example,
+        which is a branch bifurcation (i.e., one parent + two child branches)
+        """
         # prefix = [bs, max window len, max seq len, data dim]
-        # seq_len is the real seq len, seq_len = [bs, max window len]
-        # window_len is the real window len, window_len = [bs]
-        # encoder is just a branch encoder
-        # target = [bs, max seq len, data dim]
+        # seq_len = [bs, max window len] -> stores len of each prefix branch per batch branch (max window len no. of prefix branches per branch)
+        # target = [bs, max seq len, data dim]; max seq len = L (arg.max_length)
         # target_seq_len = [bs,2]
+        # encoder is just a branch encoder
         batch_size, max_wind_l, max_seq_l, input_dim = prefix.shape
-        target_l_seq_len = target_seq_len[:, 0]
+        target_l_seq_len = target_seq_len[:, 0] #all left child target branch len in batch
         target_r_seq_len = target_seq_len[:, 1]
-        output_dim = self.decoder.output_dim
+        output_dim = self.decoder.output_dim #args.dim = 64
 
         # get h_path using pooling
         all_seq_len, all_seq = [], []
-        for idx, t in enumerate(window_len):
-            all_seq_len.extend(seq_len[idx][:t])
+        # window_len: (batch x 1): each batch dim holds an int of window len
+        for idx, t in enumerate(window_len): #for each branch sample, extarct window_len no. of prefix branches
+            #t = num of preix branches to consider per branch in a batch dim
+            #idx = batch dim 
+            all_seq_len.extend(seq_len[idx][:t]) 
             all_seq.append(prefix[idx][:t])
-            
+        
+        #all_seq_len = [batch * window_len]: 1D list of all branch lengths for prefix branches across batch
+        #before permute:  all_seq =  [batch*t, seq_len, 3] all prefix branches 
         # all_seq = [max seq len, sum(window_len), data dim] after permute
+            #sum(window_len) = sum of all the window_len in the batch i.e. batch*t assuming uniform window_len
+            # max seq len = seq_len 
+            #all_seq[i,:,:] gives the 3D coordinates of all the ith point on each prefix branch in the batch
+            # all_seq[i,:,:] contains info about all branches 
         all_seq = torch.cat(all_seq, dim=0).permute(1, 0, 2)
-        hiddens, cells = self.encoder(all_seq, all_seq_len)
+        hiddens, cells = self.encoder(all_seq, all_seq_len) 
 
-        hidden_seq = torch.cat([hiddens, cells], dim=-1)
+        #hidden_seq: [n_layers * n_directions, batch_size, hidden_dim * 2] = [2, batch_size, hidden_dim * 2]
+        #encoded rep for each single branch in the batch (r_b)
+        hidden_seq = torch.cat([hiddens, cells], dim=-1) 
 
+        #get local context embedding: h_local = h_path
         # pooling to get h_path = [bs, n_layers*2*hidden_dim]
         if self.remove_path:
             h_path = torch.zeros([batch_size, hidden_seq.shape[0] * hidden_seq.shape[2]]).to(self.device)
         else:
             if self.new_model:
+                #use lstm to aggregate r_b reps
+                # cond_hidden or cond_cell: [n_layers, batch_size, hidden_dim]
                 cond_hidden, cond_cell = self.condition_encoder(prefix, seq_len, window_len)
+                #  h_path = [2*n_layers, batch_size, hidden_dim] aka [[hidden 1 for all prefix branches], [hidd 2], [cell1 ], [cell2]]
                 h_path = torch.cat([cond_hidden, cond_cell], dim=0)
+                # after permute h_path = [batch_size,2*n_layers, hidden_dim] aka [[[hidd 1 for b1's prefix branches], [hidd 2 for b1's], [cell1 for b1's], [cell2 for b1's]], [state encodings for 2nd branch's prefix branches in batch ], ...]
+                # after reshape (flatten): [batch_size, 2*n_layers*hidden_dim] = [batch_size, 256] aka [[embedding rep for b1], [embedding rep for the prefix path to ending at 2nd branch in batch]] 
                 h_path = h_path.permute(1, 0, 2).reshape(batch_size, -1)
             else:
                 h_path = []
                 pre_cnt = 0
-
+                #use EMA (method in paper)
                 def compress_path_embedding(y, forgettable, device):
                     if forgettable == None:
                         return torch.mean(y, 1)
@@ -290,19 +326,29 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
                     h_path.append(
                         compress_path_embedding(hidden_seq[:, pre_cnt:pre_cnt + wl, :], self.forgettable, self.device))
                     pre_cnt += wl
+                #h_path: [batch_size, n_layers * 2 * hidden_dim] = [batch_size, 256]
                 h_path = torch.stack(h_path).reshape(batch_size, -1)
 
         if self.remove_global:
             h_global = torch.zeros([batch_size, self.global_dim]).to(self.device)
         else:
             if offset.shape[0] == 0:
+                #empty tree
                 h_global = torch.zeros([batch_size, self.global_dim]).to(self.device)
             else:
+                # node (before permute): [total_nodes, L, 3] 
+                #node after permute: [L, total_nodes, 3]
                 node = node.permute(1, 0, 2)
+                #assume every branch is the same length, there are node.shape[1] number of branches in the batch
                 node_len = target_l_seq_len[0] * torch.ones(node.shape[1])
+                #hidden, cell: [n_layers, total_nodes, hidden_dim]
                 hidden, cell = self.encoder(node, node_len)
                 node = torch.cat((hidden, cell), dim=0)
+                #branch encoding for each node (branch in node): [total_nodes, 2 * n_layers * hidden_dim]
                 node = node.permute(1, 0, 2).reshape(hidden.shape[1], -1)
+                # node: [N*32*3]
+                #offset: [total_nodes]: map node to sample in batch
+                # edge: [D, total_nodes, total_nodes] (sparse)
                 h_global = self.tgnn(node, offset, edge)
 
 

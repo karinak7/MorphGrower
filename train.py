@@ -18,28 +18,38 @@ from scripts.training import train_conditional_one_epoch, evaluateCVAE
 def createDataset(neurons, neuron_files, args):
     branches, offsets, dataset, Tree = [],[],[],[]
     cnt = 0
-    for neuron in neurons:
+    for neuron in neurons: #for each neuron tree obj
         print(cnt, neuron_files[cnt])
         cnt += 1
+        #single as in single neuron
         single_branches, single_offsets, single_dataset, single_layer, single_node = neuron.fetch_branch_seq(align=args.align, move=True, need_length=args.sort_length, need_angle=args.sort_angle)
         for i in range(len(single_branches)):
             br = single_branches[i]
             if len(br) != args.align:
                 print("alert")
+                #forced alignment, cut off coordinates if they exceed the max
                 single_branches[i] = br[:args.align]
+        #for a single neuron, build tree rep where branches are nodes 
+        #singe_Tree: [{'edge': edge, 'node': node}, ...]. Size (# soma branches in the neuron, dict of 2 values), the ith element is a dict indicating the subtree structure rooted at soma branch i
+        #node: (num_branches, L, 3)
         single_Tree = tree_construction(single_branches, single_dataset, single_layer, single_node)
         # re-label dataset
-        prefix_len = len(branches)
+        prefix_len = len(branches) #branches = total number of branches
         new_single_dataset = []
         for data in single_dataset:
-            prefix_array = list(x+prefix_len for x in data[0])
-            target_tuple = tuple(x+prefix_len for x in data[1])
+            #convert index into global index space (unique index for each branch across all neurons)
+            #same branch has the same index across prefix_array and target_tuple 
+            prefix_array = list(x+prefix_len for x in data[0]) #[[global id1, global id2, ...]]
+            target_tuple = tuple(x+prefix_len for x in data[1]) #refrence sibling (children) branches which act as target for generation
             new_single_dataset.append((prefix_array,target_tuple,data[2]))
 
+        #branches and data of all neurons 
         branches.extend(single_branches)
         dataset.extend(new_single_dataset)
-        Tree.extend(single_Tree)
+        #list of singe_Tree 
+        Tree.extend(single_Tree) #QUESTION: is it impossible to find the corresponding tree idx for a single branch?
         offsets.extend(single_offsets)
+        #data_dim=3, max_length=32, wind_len=4
     return ConditionalPrefixSeqDataset(branches,dataset,args.max_length,args.max_length,args.data_dim,args.wind_len,Tree)
 
 if __name__ == '__main__':
@@ -70,6 +80,8 @@ if __name__ == '__main__':
     assert args.train_ratio > 0 and args.valid_ratio > 0,\
         'there should be samples in train and valid set'
     if args.before_log_dir == '':
+        #shuffle and dividing the dataset into train, valid, test
+        #for each subset: store a list of the neuron data's indices
         random.shuffle(all_idx)
         train_num = int(args.train_ratio * len(neurons))
         valid_num = int(args.valid_ratio * len(neurons))
@@ -77,28 +89,32 @@ if __name__ == '__main__':
         valid_idx = all_idx[train_num: train_num + valid_num]
         test_idx = all_idx[train_num + valid_num:]
     else:
+        #otherwise use the configuration from the log file
         log = json.load(open(args.before_log_dir))
         train_idx = log['data_split']['train']
         valid_idx = log['data_split']['valid']
         test_idx = log['data_split']['test']
 
     print(len(train_idx))
+    #pass in a list of neuron Tree objections [neuron_t1, neuron_t2, ...]
     train_set = createDataset(neurons=[neurons[t] for t in train_idx],neuron_files=[neuron_files[t] for t in train_idx],args=args)
     print(len(valid_idx))
     valid_set = createDataset(neurons=[neurons[t] for t in valid_idx],neuron_files=[neuron_files[t] for t in valid_idx],args=args)
     print(len(test_idx))
     test_set = createDataset(neurons=[neurons[t] for t in test_idx],neuron_files=[neuron_files[t] for t in test_idx],args=args)
 
+    #arg.bs = batch size for training 
     train_loader = DataLoader(train_set, args.bs, shuffle=True,collate_fn=my_collate)
     valid_loader = DataLoader(valid_set, args.bs, shuffle=False,collate_fn=my_collate)
     test_loader = DataLoader(test_set, args.bs, shuffle=False,collate_fn=my_collate)
 
     ############### model create ###############
     if args.model_type=='lstm':
-        hidden = args.dim
+        hidden = args.dim #default 64
         dropout = args.dropout
         encoder = ConditionalSeqEncoder(3, hidden, hidden, dropout=dropout)
         decoder = ConditionalSeqDecoder(3, hidden, hidden, dropout=dropout)
+        #in_channel = 256, emb_channel = out_channel = 64
         tgnn = TGNN(args.tgnn_size, args.tgnn_in_channel, args.tgnn_emb_channel, args.tgnn_out_channel)
         distribution = vMF(hidden, kappa=args.kappa, device=device)
 
@@ -157,7 +173,7 @@ if __name__ == '__main__':
         print(f'[INFO] training on epoch {epoch}')
         train_recon_loss = train_conditional_one_epoch(
         train_loader, VAE, optimizer, reconstruction_loss, regression_loss,
-        device, teaching=args.teaching)
+        device, teaching=args.teaching) #TRAINING
         log_info['losses']['train'].append({
             'reconstruction': train_recon_loss,
             'total': train_recon_loss

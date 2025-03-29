@@ -759,6 +759,25 @@ class Tree(object):
                 self.dfs_branches(x, curr, False, branches, leafs)
 
     def fetch_branch_seq(self, align=False, move=False, need_length=False, need_angle=False, need_type=False, need_id=False):
+        """
+        *branches: list of all branches. [[[coordinates for first point in b1], [], []], ... ]
+        *offsets: 2D ls, entry at i stores the coordinates of soma in branch i
+        *dataset: each branch, find its prefix path and left and right children branches
+        [[[all ancestor prefix branch ids incl the parent branch of left and right children], 
+                   (left child branch id, right child branch id), 
+                   (number of leaf branches in subtree rooted at left child, 
+                   number of leaf branches in subtree rooted at right child )  
+                   ], [], ...]
+        *layer:[(branch_id, depth)] for all branches
+        *node: A map for each soma branch rooted tree. forest of soma branch subtrees i.e. for each soma branch, 
+        find all its descendant branches with depth and branch_id info
+        {branch_id: {depth: 
+                    [list of branch id starting at 
+                    depth from branch_id root branch]
+                    }}
+        *neuron_types: list of the branch types for each branch in tree. ith elem = type of ith branch (e.g. soma, dendrite, axon)
+        *neuron_id: list of lists of node ids. [[node ids for nodes in branch 1], ...]
+        """
         if not self.check_binary():
             raise NotImplementedError(
                 'not binary-tree-like structure '
@@ -777,6 +796,7 @@ class Tree(object):
         else:
             neuron_id = None
         for son in self.nodes[0].sons:
+            #for the child of the soma nodes -> i.e. fetch the soma branches
             self.dfs_prefix_branch(son, self.nodes[0], branches, dataset, layer, node, [], neuron_types, neuron_id)
 
 
@@ -790,7 +810,7 @@ class Tree(object):
         offsets = [0] * len(branches)
         if move:
             for idx, x in enumerate(branches):
-                offset = x[0]
+                offset = x[0] #soma coordinates; 3D 
                 offsets[idx] = offset
                 branches[idx] = x - offset
 
@@ -802,7 +822,30 @@ class Tree(object):
             return branches, offsets, dataset, layer, node, neuron_id
         return branches, offsets, dataset, layer, node
 
-    def dfs_prefix_branch(self, curr, father, branches, dataset, layer, node, curr_prefix, neuron_types, neuron_id):
+    def dfs_prefix_branch(self, curr:Node, father, branches, dataset, layer, node, curr_prefix, neuron_types, neuron_id):
+        """
+        curr_prefix: stack that tracks curr prefix branch whose children are still recursing.
+        -latest elem in this stack will always be the immediate prefix branch to curr branch in current iteration
+        layer = [(root_id, depth), ...]
+        - for each branch, stores the branch's root id and its depth
+        node: forest map of substrees rooted at each soma branch
+        - {branch_id: {depth: [list of branch id starting at depth from branch_id root branch]}}
+        - stores the subtrees where the "nodes" are actually the branches 
+        dataset: [[[all ancestor prefix branch ids], 
+                   (left child branch id, right child branch id), 
+                   (number of leaf branches in subtree rooted at left child, 
+                   number of leaf branches in subtree rooted at right child )  
+                   ], [], ...]
+        - left_node and right_node are bifurcations from ending node of branch
+        curr_branch: [[x1,y1,z1], [x2,y2,z2], ...]
+        branches: list of all branches, each branch has format of curr_branch. 
+        - The branch_id matches the index of the branch in this list
+        - [
+        [[x1,y1,z1], [x2,y2,z2], ...], [[x1,y1,z1], [x2,y2,z2], ...]
+        [[x1,y1,z1], [x2,y2,z2], ...], [[x1,y1,z1], [x2,y2,z2], ...], ...
+        ]
+        """
+        #process a single branch and its 2 children if it has 
         curr_branch = [father.data['pos']]
         if neuron_id is not None:
             curr_id = []
@@ -813,32 +856,38 @@ class Tree(object):
             if neuron_id is not None:
                 curr_id.append(curr.Idx)
             if curr.sons is None or len(curr.sons) != 1:
+                #terminate a branch (either leaf or bifurcation)
                 break
             curr = curr.sons[0]
         branches.append(np.array(curr_branch))
         if neuron_id is not None:
             neuron_id.append(curr_id)
         branch_id = len(branches) - 1
-        if curr_prefix:
-            depth = layer[curr_prefix[-1]][1] + 1
-            root = curr_prefix[0]
-            layer.append((root, depth))
-            if depth in node[root]:
+        #cur_prefix stores a list of branch_ids for ancestor/prefix branches
+        if curr_prefix: # list of branch_ids that are prefixes to cur branch 
+            depth = layer[curr_prefix[-1]][1] + 1 #depth of cur branch = depth of deepest prefix branch + 1
+            root = curr_prefix[0] #root branch id (i.e. soma branch that is ancestor to cur branch)
+            layer.append((root, depth)) #layer = [(root_id, depth)]
+            if depth in node[root]: #node: {branch_id: {depth: [list of branch id starting at depth from branch_id root branch]}}
                 node[root][depth].append(branch_id)
             else:
+                #create a new depth where the current branch is at that depth starting from the root branch (root branch is one of its prefix branches)
                 node[root][depth] = [branch_id]
         else:
             layer.append((branch_id, 0))
             node[branch_id] = {}
             node[branch_id][0] = [branch_id]
         curr_prefix.append(branch_id)
+        #case of intermediate branch -> bifurcation - recursion (update the datastructure directly in recursive steps)
         if curr.sons is not None and len(curr.sons) == 2:
             left_son = self.dfs_prefix_branch(
                 curr.sons[0], curr, branches, dataset, layer, node, curr_prefix, neuron_types, neuron_id
             )
             right_son = self.dfs_prefix_branch(
                 curr.sons[1], curr, branches, dataset, layer, node, curr_prefix, neuron_types, neuron_id
-            )
+            ) 
+
+            #if first son has more leaf nodes than second son ... (Q not sure what data['leaf'] of node contains)
             if (curr.sons[0].data['leaf'] >= curr.sons[1].data['leaf']):
                 dataset.append([
                     deepcopy(curr_prefix), (left_son, right_son),
@@ -1294,6 +1343,7 @@ def load_neuron(file_path, scaling=1.0):
 
 
 def load_neurons(folder, verbose=False, return_reidx=False, scaling=1., return_filelist=False):
+    #return a list of resampled neurons
     neurons = []
     files = sorted([x for x in os.listdir(folder) if not os.path.isdir(x)])
     reidx = {}
@@ -1306,9 +1356,10 @@ def load_neurons(folder, verbose=False, return_reidx=False, scaling=1., return_f
             names=['n', 'type', 'x', 'y', 'z', 'radius', 'parent'],
             index_col=False
         )
-        swc = merge_soma(swc)
+        swc = merge_soma(swc) #preprocessing (merge multiple somas)
         file_list.append(f)
-        reidx[f] = len(neurons)
+        #the current resampled neuron about to be added to the list will take idx len(neurons)
+        reidx[f] = len(neurons) #{file_name of resampled neuron: idx of resampled neuron in the neurons list}
         neurons.append(Tree().tree_from_swc(swc, scaling=scaling))
 
     if return_reidx:

@@ -79,9 +79,9 @@ def add_data_args(parser):
     parser.add_argument('--max_length', default=32, type=int,
                         help='the max length for resample')
     parser.add_argument('--wind_len', default=4, type=int,
-                        help='the max length of the prefix window')
+                        help='the max length of the prefix window') #w for smoothing algo?
     parser.add_argument('--align', default=32, type=int,
-                        help = 'the step number to resample, need to be greater than 1')
+                        help = 'the step number to resample, need to be greater than 1') #distance between sampled points
     parser.add_argument('--scaling', default=10, type=float,
                         help='the scale the scale down the coordiante, (default: 1)')
     return parser

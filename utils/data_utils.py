@@ -20,7 +20,7 @@ def edge_calculation(dataset, size=256):
     cols = []
     data = []
     for i in range(len(dataset)):
-        for j in range(len(dataset[i][1])):
+        for j in range(len(dataset[i][1])): #for ith branch and its prefix branches (self incl)
             rows.append(dataset[i][1][j])
             cols.append(dataset[i][0][-1])
             data.append(len(dataset[i][0]))
@@ -28,25 +28,78 @@ def edge_calculation(dataset, size=256):
     return edge
 
 def node_calculation(layer, node):
-    pre_node = [[] for i in range(len(layer))]
+    """
+    pre_node:
+    #size (num_soma_branches, #descendants_from_soma_branch)
+    #[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
+    """
+    #layer = [(root_id, depth)]
+    #node forest map of substrees rooted at each soma branch
+    pre_node = [[] for i in range(len(layer))] #(num_soma_branches, #descendants_from_soma_branch):[[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
     for i in range(len(layer)):
         for depth in range(layer[i][1]):
             pre_node[i] += node[layer[i][0]][depth]
     return pre_node
 
 def tree_construction(branches, dataset, layer, nodes):
+    #construct trees for global topology 
+    # var node = a subtree (set of branches). Size: (num_branches, branch_len, 3)
+    #we build a tree rooted at each branch, but for non-soma branches, their tree structure will be empty
     branches = np.array(branches)
     e = edge_calculation(dataset, size=len(branches))
-    pre_node = node_calculation(layer, nodes)
+    pre_node = node_calculation(layer, nodes) # branch i gets an entry in list layer (as (root_id, depth)) at the ith idx
     tree = []
     for i in range(len(branches)):
-        node = branches[pre_node[i]]
+        node = branches[pre_node[i]] # find all branches that are descendant to branch i (empty if branch i is not soma branch)
+        #build an adjacency matrix: size: num_branches x num_branches (tree graph rep)
         m, n = np.ix_(pre_node[i], pre_node[i])
-        edge = e[m, n].tocoo()
+        #convert into coordinate sparse format: efficient use in PyTorch sparse tensors and for passing into a T-GNN
+        edge = e[m, n].tocoo() 
+        # a tree of subtrees (a forest of trees for each soma branch): 
+        # node is a subtree i.e. list of nodes (branches), edge = adjacency matrix of that subtree 
         tree.append({'edge': edge, 'node': node})
     return tree
 
 def my_collate(data):
+    """
+    data is a batch of samples: Each data[i] contains a single sample:
+    (
+    padded_source,    # prefix branches [W, L, 3]
+    target_l,         # left child branch [L, 3]
+    target_r,         # right child branch [L, 3]
+    real_wind_len,    # int
+    seq_len,          # [W] (stores length of each prefix branch, W prefix branches)
+    target_len,       # [2] (length of left and right branches)
+    node,             # [#branches, L, 3] (node-level global condition)
+    edge              # sparse edge matrix (adjacency for global condition)
+    )
+    
+    return output: 
+    (
+    padded_source,  # [B, W, L, 3]
+    target_l,       # [B, L, 3]
+    target_r,       # [B, L, 3]
+    real_wind_len,  # [B]
+    seq_len,        # [B, W]
+    target_len,     # [B, 2]
+    node,           # [total_nodes, L, 3]
+    offset,         # [total_nodes]
+    edge            # sparse_coo_tensor
+    )
+    * B=batch size 
+    * offset: specifies which data sample each branch in node ds belongs to 
+    * total_nodes = total num branches in batch
+    #nodes -> list of branches [L,3], each branch is viewed as a node in tree graph rep (flattend across batch)
+    #edge 
+
+
+
+    Conditional info: 
+    Local condition: padded_source (W prefix branches of shape [L, 3])
+	Global condition: node, edge, and offset
+    """
+    #after sampling a batch data, combine them together in the follow way
+    #see ConditionalPrefixSeqDataset get_item for what each var below means
     padded_source = torch.stack([data[i][0] for i in range(len(data))], dim=0)
     target_l = torch.stack([data[i][1] for i in range(len(data))], dim=0)
     target_r = torch.stack([data[i][2] for i in range(len(data))], dim=0)
@@ -54,10 +107,10 @@ def my_collate(data):
     seq_len = torch.stack([data[i][4] for i in range(len(data))], dim=0)
     target_len = torch.stack([data[i][5] for i in range(len(data))], dim=0)
 
-    node = [data[i][6] for i in range(len(data))]
+    node = [data[i][6] for i in range(len(data))] #each data[i] is about same branch (batchsize, #branches per sample, L, 3)
     offset = []
     for i in range(len(data)):
-        offset += [i for j in range(len(data[i][6]))]
+        offset += [i for j in range(len(data[i][6]))] # 1D array: for each branch in node (dim 2), record which data sample it belongs to 
 
     if offset == []:
         offset = torch.tensor([])
@@ -65,13 +118,19 @@ def my_collate(data):
         offset.append(len(data) - 1)
         node.append(torch.zeros((1, 16, 3)))
     offset = torch.tensor(offset)
-    node = torch.concat(node, dim=0)
-
-    edge = scipy.sparse.block_diag(mats=[data[j][7] for j in range(len(data))])
-    layer = edge.data
-    row = edge.row
-    col = edge.col
-    data = np.ones(layer.shape)
+    node = torch.concat(node, dim=0) # (batch_size * # branches per sample, L,3)
+    
+    # [ edge_0   0        0      ] #edge_0 and 0 are matrices 
+    # [   0    edge_1     0      ]
+    # [   0      0      edge_2   ]
+    # no interaction across different samples (each sample is a branch, and the subtrees rooted at the branch if it is a soma branch) 
+    edge = scipy.sparse.block_diag(mats=[data[j][7] for j in range(len(data))]) #(total_nodes x total_nodes)
+    layer = edge.data #value of non-zero elems in edge sparse matrix
+    row = edge.row #row index of corresponding value in edge sparse matrix 
+    col = edge.col #col index ... 
+    #so at index i we have: edge[row[i], col[i]] has value == layer[i]
+    #just marking connection here - actual edge connection vals understand edge_calculation
+    data = np.ones(layer.shape) #data var got renamed 
     if edge.shape[0] == 0 or edge.shape[1] == 0:
         _max = 0
     else:
@@ -88,10 +147,10 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
     ):
         self.branches = branches
         self.dataset = dataset
-        self.max_src_length = max_src_length
-        self.max_dst_length = max_dst_length
-        self.max_window_length = max_window_length
-        self.data_dim = data_dim
+        self.max_src_length = max_src_length #input branch len
+        self.max_dst_length = max_dst_length #predicted output branch len
+        self.max_window_length = max_window_length #w parameter for branch smoothing? 
+        self.data_dim = data_dim # dim of 3D coordiante 
         self.masking_element = masking_element
         self.resample = resample
         self.trees = trees
@@ -103,26 +162,52 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index):
+        """
+        neuron agnostic -> example for training is a bifurcation where
+        with all prefix branches (limited by window len) and the 2 children branches. 
+        The prefix branches for the h_local input seq.
+
+        This function deals with a single branch at index=index. 
+
+        Returning: information about a single branch
+        padded_source: prefix branches up to bifurcation (i.e. the local prefix path)
+        target_l: target left child branch
+        target_r: target right child branch
+        real_wind_len: prefix window i.e. num of prefix branches to consider 
+        seq_len: list of branch len for each selected prefix branch
+        target_len: len of left child and right child branches
+        node: list of branches rooted at "soma" branch each of size [L, 3]
+            with branch_id = index (empty if branch at index is not a soma branch)
+        edge: adjacency matrix for all the branches in subtree node. 
+        """
+        #get prefix branches (i.e. req for local condition) for a single branch (idx) from a single neuron
         wind_l = self.max_window_length
+        #source shape: [wind_l, max_src_L, 3]
+        #wind_l = number prefix branches considered in learning local condition 
+        #pading for branches shorter than max src length
         s_shape = (wind_l, self.max_src_length, self.data_dim)
         padded_source = torch.ones(s_shape) * self.masking_element
+        #target shape: [L, 3] where L = # nodes in a branch
         t_shape = (self.max_dst_length, self.data_dim)
         target_l = torch.ones(t_shape) * self.masking_element
         target_r = torch.ones(t_shape) * self.masking_element
 
         real_wind_len, seq_len = 0, []
+        # prefix = prefix branches leading up to the children branches, targets = 2 children branches 
         prefix, targets, _ = self.dataset[index]
+        #select the last wind_l number of prefix branches from the prefix list 
         for idx, branch_id in enumerate(prefix[-wind_l:]):
             branch = torch.from_numpy(self.branches[branch_id])
             branch_l = len(branch)
             padded_source[idx][:branch_l] = branch
             real_wind_len += 1
-            seq_len.append(branch_l)
+            seq_len.append(branch_l) #seq_len=list of branch len for selected prefix branches
 
         while len(seq_len) != wind_l:
             seq_len.append(0)
         seq_len = torch.LongTensor(seq_len)
         if self.resample:
+            #resample target branches to max_dst_length
             target_l = torch.from_numpy(self.resampled_branches[targets[0]]).to(torch.float32)
             target_r = torch.from_numpy(self.resampled_branches[targets[1]]).to(torch.float32)
             target_len = torch.tensor([self.max_dst_length, self.max_dst_length])
@@ -132,10 +217,13 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
             target_l[:target_len[0]] = torch.from_numpy(branch_l)
             target_r[:target_len[1]] = torch.from_numpy(branch_r)
 
-        new_index = prefix[-1]
+        new_index = prefix[-1] #last prefix branch
+        #it's possible that if index doesn't denote a soma branch then node and edge ds will be empty 
         node = torch.from_numpy(self.trees[new_index]['node'])
         node = node.to(torch.float32)
         edge = self.trees[new_index]['edge']
+        
+        #target_len = [len(left child branch), len(right child)]
         return padded_source, target_l, target_r, real_wind_len, seq_len, target_len, node, edge
 
 
