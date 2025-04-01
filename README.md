@@ -38,7 +38,8 @@ pyg: 2.3.1
 morphpy: 0.7.2
 pandas: 1.3.5
 ```
-
+Note:  numpy version stated above is not compatible with the stated scipy version (install numpy 1.22.4 as bare min). morphpy is the wrong spelt package, 
+should be morphopy a package developed by berens lab
 ### Prepare Data
 We use four datasets，you can download them:
 

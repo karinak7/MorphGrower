@@ -15,8 +15,10 @@ from utils.data_utils import fix_seed, node_calculation, edge_calculation
 from utils.utils import load_neurons, Tree, Node
 from utils.log_utils import parser_generate_args
 from scripts.measure_branch import angle_metric, branches_metric
+import ipdb
 
 
+# ipdb.set_trace()
 def create_input(data, branches, offsets, e, pre_node, args):
     branches = np.array(branches)
     data_dim = 3

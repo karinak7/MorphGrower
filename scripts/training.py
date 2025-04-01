@@ -38,9 +38,7 @@ def evaluateCVAE(
             Nnum += len(prefix)
     return epoch_recon_loss / Nnum
 
-
-
-def pretrain_one_epoch(
+_one_epoch(
     dataloader, model, optimizer, recon_loss,
     device, teaching=0.5,
 ):

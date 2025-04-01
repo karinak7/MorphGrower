@@ -3,13 +3,15 @@ channels:
   - pytorch
   - conda-forge
 dependencies:
-  - python=3.9.*
-  - torch=2.0.0
-  - numpy=1.21.2
+  - python=3.10.*
+  - pytorch=2.0.0=cuda120py310ha3a684c_304
+  - cuda-toolkit=12.0
+  - numpy=1.23
   - scikit-learn=1.2.2
   - scipy=1.12.0
   - pandas=1.3.5
+  - pyg==2.3.1
+  - matplotlib
   - pip
   - pip:
-      - pyg==2.3.1
-      - morphpy==0.7.2
+      - morphopy==0.7.2

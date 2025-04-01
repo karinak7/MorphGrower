@@ -9,7 +9,8 @@ from copy import deepcopy
 from matplotlib import pyplot as plt
 from morphopy.neurontree import NeuronTree as nt
 from scipy.spatial import ConvexHull
-from scipy.io import scio
+# from scipy.io import scio
+import scipy.io as scio
 
 
 def add_edge(father, son):
