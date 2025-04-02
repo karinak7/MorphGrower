@@ -30,8 +30,12 @@ def edge_calculation(dataset, size=256):
 def node_calculation(layer, node):
     """
     pre_node:
-    #size (num_soma_branches, #descendants_from_soma_branch)
-    #[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
+    #size (num_soma_branches, #descendants_from_soma_branch incl)
+    #[[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
+    layer = [(root_id, depth), ...]
+        - for each branch, stores the branch's root id and its depth
+    node: forest map of substrees rooted at each soma branch
+        - {branch_id: {depth: [list of branch id starting at depth from branch_id root branch]}}
     """
     #layer = [(root_id, depth)]
     #node forest map of substrees rooted at each soma branch
@@ -62,6 +66,7 @@ def tree_construction(branches, dataset, layer, nodes):
 
 def my_collate(data):
     """
+    Go to ConditionalPrefixSeqDataset
     data is a batch of samples: Each data[i] contains a single sample:
     (
     padded_source,    # prefix branches [W, L, 3]
@@ -89,7 +94,7 @@ def my_collate(data):
     * B=batch size 
     * offset: specifies which data sample each branch in node ds belongs to 
     * total_nodes = total num branches in batch
-    #nodes -> list of branches [L,3], each branch is viewed as a node in tree graph rep (flattend across batch)
+    #node -> list of branches [L,3], each branch is viewed as a node in tree graph rep (flattend across batch)
     #edge 
 
 
@@ -168,6 +173,12 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         The prefix branches for the h_local input seq.
 
         This function deals with a single branch at index=index. 
+        
+        dataset: [[[all ancestor prefix branch ids], 
+                   (left child branch id, right child branch id), 
+                   (number of leaf branches in subtree rooted at left child, 
+                   number of leaf branches in subtree rooted at right child )  
+                   ], [], ...]
 
         Returning: information about a single branch
         padded_source: prefix branches up to bifurcation (i.e. the local prefix path)
@@ -184,7 +195,7 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         wind_l = self.max_window_length
         #source shape: [wind_l, max_src_L, 3]
         #wind_l = number prefix branches considered in learning local condition 
-        #pading for branches shorter than max src length
+        #padding for branches shorter than max src length - just refill the padded_source matrix
         s_shape = (wind_l, self.max_src_length, self.data_dim)
         padded_source = torch.ones(s_shape) * self.masking_element
         #target shape: [L, 3] where L = # nodes in a branch

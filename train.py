@@ -39,7 +39,7 @@ def createDataset(neurons, neuron_files, args):
         for data in single_dataset:
             #convert index into global index space (unique index for each branch across all neurons)
             #same branch has the same index across prefix_array and target_tuple 
-            prefix_array = list(x+prefix_len for x in data[0]) #[[global id1, global id2, ...]]
+            prefix_array = list(x+prefix_len for x in data[0]) #[global id1, global id2, ...]
             target_tuple = tuple(x+prefix_len for x in data[1]) #refrence sibling (children) branches which act as target for generation
             new_single_dataset.append((prefix_array,target_tuple,data[2]))
 

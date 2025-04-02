@@ -770,6 +770,7 @@ class Tree(object):
                    number of leaf branches in subtree rooted at right child )  
                    ], [], ...]
         *layer:[(branch_id, depth)] for all branches
+        - for each branch, stores the branch's root id and its depth
         *node: A map for each soma branch rooted tree. forest of soma branch subtrees i.e. for each soma branch, 
         find all its descendant branches with depth and branch_id info
         {branch_id: {depth: 
@@ -847,12 +848,12 @@ class Tree(object):
         ]
         """
         #process a single branch and its 2 children if it has 
-        curr_branch = [father.data['pos']]
+        curr_branch = [father.data['pos']] # start the branch sequence from the parent node of current node on branch
         if neuron_id is not None:
             curr_id = []
         if neuron_types is not None:
             neuron_types.append(curr.data['type'])
-        while True:
+        while True: #generate the branch sequence of coordinates
             curr_branch.append(curr.data['pos'])
             if neuron_id is not None:
                 curr_id.append(curr.Idx)
