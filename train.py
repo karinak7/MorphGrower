@@ -96,7 +96,7 @@ if __name__ == '__main__':
         test_idx = log['data_split']['test']
 
     print(len(train_idx))
-    #pass in a list of neuron Tree objections [neuron_t1, neuron_t2, ...]
+    #pass in a list of neuron Tree objects [neuron_t1, neuron_t2, ...]
     train_set = createDataset(neurons=[neurons[t] for t in train_idx],neuron_files=[neuron_files[t] for t in train_idx],args=args)
     print(len(valid_idx))
     valid_set = createDataset(neurons=[neurons[t] for t in valid_idx],neuron_files=[neuron_files[t] for t in valid_idx],args=args)
