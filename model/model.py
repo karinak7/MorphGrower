@@ -172,7 +172,7 @@ class ConditionEncoder(torch.nn.Module):
         return h_path, c_path
 
 
-class xConditionalSeq2SeqVAE(torch.nn.Module):
+class ConditionalSeq2SeqVAE(torch.nn.Module):
     def __init__(self, encoder, decoder, distribution, tgnn, device, forgettable=None, remove_path=False,
                 remove_global=False, new_model=False, dropout=0.1):
         super(ConditionalSeq2SeqVAE, self).__init__()
