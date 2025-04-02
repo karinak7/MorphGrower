@@ -1490,9 +1490,16 @@ def smooth_swc(folder, save_path):
             index_col=False
         )
         swc = merge_soma(swc)
-        if os.path.exists(save_path + '/' + f):
+        output_file = os.path.join(save_path, f)
+        # if os.path.exists(save_path + '/' + f)
+        if os.path.exists(output_file):
             continue
 
         tree = resample(smooth(Tree().tree_from_swc(swc, scaling=1).cut_node()))
         branches, offsets, dataset, layer, node = tree.fetch_branch_seq()
         max_dep.append(np.max([len(i[0]) for i in dataset]))
+        # Convert processed tree back to SWC DataFrame.
+        swc_smoothed = tree.to_swc(scaling=1)
+        # Save the smoothed SWC file.
+        swc_smoothed.to_csv(output_file, header=False, index=False, sep=' ')
+    print("Maximum depths across processed files:", max_dep)
