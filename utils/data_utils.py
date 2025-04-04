@@ -126,8 +126,10 @@ def my_collate(data):
         print("[DEBUG] data_utils.py: if offset==[]")
     elif offset[-1] != len(data) - 1:
         offset.append(len(data) - 1)
-        node.append(torch.zeros((1, 16, 3))) # 
+        # node.append(torch.zeros((1, 16, 3))) 
+        node.append(torch.zeros((1,32,3)))
         print("[DEBUG] data_utils.py: else offset[-1]")
+    # print("[DEBUG] data_utils.py: node", node)
     offset = torch.tensor(offset)
     node = torch.concat(node, dim=0) # (batch_size * # branches per sample, L,3)
     
@@ -231,10 +233,13 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
 
         new_index = prefix[-1] #last prefix branch
         #it's possible that if index doesn't denote a soma branch then node and edge ds will be empty 
-        print("[DEBUG] self.trees[new_index]:", self.trees[new_index])
-        print("[DEBUG] self.trees[new_index][node]:", self.trees[new_index]["node"])
+        # print("[DEBUG] self.trees[new_index]:", self.trees[new_index])
+        # print("[DEBUG] self.trees[new_index][node]:", self.trees[new_index]["node"], "new_index:", new_index)
         node = torch.from_numpy(self.trees[new_index]['node'])
         node = node.to(torch.float32)
+        # print("[DEBUG] data_utils.py: new_index, node.shape", new_index, node.shape)
+        if node.shape[0] == 0:
+            print("[DEBUG] data_utils new_index, node (soma branch):", new_index, node)
         edge = self.trees[new_index]['edge']
         
         #target_len = [len(left child branch), len(right child)]
