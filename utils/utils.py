@@ -634,6 +634,9 @@ class Tree(object):
 
     ######## for sort begin ########
     def sort_son(self, branches, dataset, need_length=False, need_angle=False):
+        """
+        sort the 2 son branches based on their angle and/or len
+        """
         # mode = "N", "A"
         if not (need_length and need_angle):
             return dataset
@@ -647,9 +650,10 @@ class Tree(object):
             if need_angle:
                 a = angle[lson]
                 b = angle[rson]
+                #before sorting, left branch always to the left of right branch in tuple
                 if abs(a-b)/max(a,b)>0.1 and b>a:
-                    dataset[idx][1] = (data[1][1], data[1][0])
-                    dataset[idx][2] = (data[2][1], data[2][0])
+                    dataset[idx][1] = (data[1][1], data[1][0]) #swap right and left son branches
+                    dataset[idx][2] = (data[2][1], data[2][0]) #swap no. leaf branches rooted at son branches so they match correct son branch
                     continue
             if need_length:
                 a = length[lson]
@@ -691,6 +695,10 @@ class Tree(object):
         return self.nodes[-1]
 
     def dfs_leaf_num(self, x):
+        """
+        count how many leaf nodes in tree rooted at x.
+        if x is a leaf node then it has exactly 1 leaf node == itself
+        """
         if x.sons is None or len(x.sons) == 0:
             x.data['leaf'] = 1
             return
@@ -762,7 +770,7 @@ class Tree(object):
     def fetch_branch_seq(self, align=False, move=False, need_length=False, need_angle=False, need_type=False, need_id=False):
         """
         *branches: list of all branches. [[[coordinates for first point in b1], [], []], ... ]
-        *offsets: 2D ls, entry at i stores the coordinates of soma in branch i
+        *offsets: 2D ls, entry at i stores start point coordinate of each branch 
         *dataset: each branch, find its prefix path and left and right children branches
         [[[all ancestor prefix branch ids incl the parent branch of left and right children], 
                    (left child branch id, right child branch id), 
@@ -797,24 +805,26 @@ class Tree(object):
             neuron_id = []
         else:
             neuron_id = None
-        for son in self.nodes[0].sons:
-            #for the child of the soma nodes -> i.e. fetch the soma branches
+        for son in self.nodes[0].sons: #self.nodes = nodes of neuron Tree obj (i.e. node on branch)
+            #for the child of the soma node -> i.e. fetch the soma branches
             self.dfs_prefix_branch(son, self.nodes[0], branches, dataset, layer, node, [], neuron_types, neuron_id)
 
 
+        #offset neuron points by soma (origin=soma)
         if align > 1:
-            offset = self.nodes[0].data['pos']
+            offset = self.nodes[0].data['pos'] #soma coordinates; 3D ? 
             for idx, x in enumerate(branches):
                 branches[idx] = x - offset
                 branches[idx] = resample_branch_by_step(branches[idx], align, len(branches[idx]))
         dataset = self.sort_son(branches, dataset, need_length=need_length, need_angle=need_angle)
 
+        #offset each branch by its starting pt
         offsets = [0] * len(branches)
         if move:
             for idx, x in enumerate(branches):
-                offset = x[0] #soma coordinates; 3D 
+                offset = x[0] # 3D coordinate of first/start point on branch
                 offsets[idx] = offset
-                branches[idx] = x - offset
+                branches[idx] = x - offset #each branch point coordinate is relative to start point of branch
 
         if need_type and need_id:
             return branches, offsets, dataset, layer, node, neuron_types, neuron_id
@@ -867,7 +877,7 @@ class Tree(object):
         branch_id = len(branches) - 1
         #cur_prefix stores a list of branch_ids for ancestor/prefix branches
         if curr_prefix: # list of branch_ids that are prefixes to cur branch 
-            depth = layer[curr_prefix[-1]][1] + 1 #depth of cur branch = depth of deepest prefix branch + 1
+            depth = layer[curr_prefix[-1]][1] + 1 #depth of cur branch = depth of deepest prefix branch + 1 (i.e. deepest prefix branch = parent branch)
             root = curr_prefix[0] #root branch id (i.e. soma branch that is ancestor to cur branch)
             layer.append((root, depth)) #layer = [(root_id, depth)]
             if depth in node[root]: #node: {branch_id: {depth: [list of branch id starting at depth from branch_id root branch]}}
@@ -875,8 +885,8 @@ class Tree(object):
             else:
                 #create a new depth where the current branch is at that depth starting from the root branch (root branch is one of its prefix branches)
                 node[root][depth] = [branch_id]
-        else:
-            layer.append((branch_id, 0))
+        else: # soma branch
+            layer.append((branch_id, 0)) 
             node[branch_id] = {}
             node[branch_id][0] = [branch_id]
         curr_prefix.append(branch_id)
@@ -1345,7 +1355,7 @@ def load_neuron(file_path, scaling=1.0):
 
 
 def load_neurons(folder, verbose=False, return_reidx=False, scaling=1., return_filelist=False):
-    #return a list of resampled neurons
+    #return a list of resampled neurons as Tree ds
     neurons = []
     files = sorted([x for x in os.listdir(folder) if not os.path.isdir(x)])
     reidx = {}

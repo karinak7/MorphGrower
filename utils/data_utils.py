@@ -34,18 +34,22 @@ def node_calculation(layer, node):
     #[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
 
     Function: 
-    seems to be getting all the branches (up until the same depth as current branch) 
+    seems to be getting all the ancestor branches (up until the same depth as current branch) 
     in the branch substree that this branch is in 
     """
     #layer = [(root_id, depth)]
     #node: forest map of substrees rooted at each soma branch
     pre_node = [[] for i in range(len(layer))] #(num_soma_branches, #descendants_from_soma_branch):[[list of branch ids rooted at root branch 0],[.. at root branch 1], ...] 
     for i in range(len(layer)): #consider each branch and its soma branch
-        for depth in range(layer[i][1]): #up to depth of current branch
-            pre_node[i] += node[layer[i][0]][depth]
+        for depth in range(layer[i][1]): #up to depth before depth of cur branch
+            pre_node[i] += node[layer[i][0]][depth] #PROBLEM: include non-ancetor branches rooted at same soma branch -> global topology? 
     return pre_node
 
 def tree_construction(branches, dataset, layer, nodes):
+    """
+    node: [no_prev_layers_branches x L x 3]
+    for each branch in tree: node = [[soma branch coords at layer 0], [branch 1 at layer 1], [b2 at layer 1], ...]
+    """
     #construct trees for global topology 
     # var node = a subtree (set of branches). Size: (num_branches, branch_len, 3)
     #we build a tree rooted at each branch, but for non-soma branches, their tree structure will be empty
@@ -54,7 +58,7 @@ def tree_construction(branches, dataset, layer, nodes):
     pre_node = node_calculation(layer, nodes) # branch i gets an entry in list layer (as (root_id, depth)) at the ith idx
     tree = []
     for i in range(len(branches)):
-        node = branches[pre_node[i]] # find all branches that are descendant to branch i (empty if branch i is not soma branch)
+        node = branches[pre_node[i]] # find all branches that are in previous layers & share same soma branch as branch i
         #build an adjacency matrix: size: num_branches x num_branches (tree graph rep)
         m, n = np.ix_(pre_node[i], pre_node[i])
         #convert into coordinate sparse format: efficient use in PyTorch sparse tensors and for passing into a T-GNN
@@ -62,6 +66,7 @@ def tree_construction(branches, dataset, layer, nodes):
         # a tree of subtrees (a forest of trees for each soma branch): 
         # node is a subtree i.e. list of nodes (branches), edge = adjacency matrix of that subtree 
         tree.append({'edge': edge, 'node': node})
+    print("[CHECK] tree[-1]['node']", tree[-1]['node']) #expect [no.prev.branches x L x 3]
     return tree
 
 def my_collate(data):
@@ -118,9 +123,11 @@ def my_collate(data):
 
     if offset == []:
         offset = torch.tensor([])
+        print("[DEBUG] data_utils.py: if offset==[]")
     elif offset[-1] != len(data) - 1:
         offset.append(len(data) - 1)
-        node.append(torch.zeros((1, 16, 3)))
+        node.append(torch.zeros((1, 16, 3))) # 
+        print("[DEBUG] data_utils.py: else offset[-1]")
     offset = torch.tensor(offset)
     node = torch.concat(node, dim=0) # (batch_size * # branches per sample, L,3)
     
@@ -200,7 +207,7 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         # prefix = prefix branches leading up to the children branches, targets = 2 children branches 
         prefix, targets, _ = self.dataset[index]
         #select the last wind_l number of prefix branches from the prefix list 
-        for idx, branch_id in enumerate(prefix[-wind_l:]):
+        for idx, branch_id in enumerate(prefix[-wind_l:]): #for each prefix branch (we select wind_l num) to current branch
             branch = torch.from_numpy(self.branches[branch_id])
             branch_l = len(branch)
             padded_source[idx][:branch_l] = branch
@@ -216,6 +223,7 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
             target_r = torch.from_numpy(self.resampled_branches[targets[1]]).to(torch.float32)
             target_len = torch.tensor([self.max_dst_length, self.max_dst_length])
         else:
+            #keep original branch length, pad shorter branch with 0 until all reach max_dst_length
             branch_l, branch_r = self.branches[targets[0]], self.branches[targets[1]]
             target_len = [len(branch_l), len(branch_r)]
             target_l[:target_len[0]] = torch.from_numpy(branch_l)

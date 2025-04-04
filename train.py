@@ -39,13 +39,13 @@ def createDataset(neurons, neuron_files, args):
         for data in single_dataset:
             #convert index into global index space (unique index for each branch across all neurons)
             #same branch has the same index across prefix_array and target_tuple 
-            prefix_array = list(x+prefix_len for x in data[0]) #[global id1, global id2, ...]
+            prefix_array = list(x+prefix_len for x in data[0]) #[global id1, global id2, ...] x=id of a branch (locally unique within 1 neuron)
             target_tuple = tuple(x+prefix_len for x in data[1]) #refrence sibling (children) branches which act as target for generation
             new_single_dataset.append((prefix_array,target_tuple,data[2]))
 
         #branches and data of all neurons 
         branches.extend(single_branches)
-        dataset.extend(new_single_dataset)
+        dataset.extend(new_single_dataset) #[no.all.branches, [[prefix branch ids],(child1_id, child2_id), (child1_leafcnt, child2_leaftcnt) ]] where branch_ids are globally unique across all neurons
         #list of singe_Tree 
         Tree.extend(single_Tree) #QUESTION: is it impossible to find the corresponding tree idx for a single branch?
         offsets.extend(single_offsets)
