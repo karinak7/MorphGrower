@@ -204,16 +204,17 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         t_shape = (self.max_dst_length, self.data_dim)
         target_l = torch.ones(t_shape) * self.masking_element
         target_r = torch.ones(t_shape) * self.masking_element
-
+        #real_wind_len = actual # prefix branches to current branch (incl cur)
         real_wind_len, seq_len = 0, []
         # prefix = prefix branches leading up to the children branches, targets = 2 children branches 
         prefix, targets, _ = self.dataset[index]
         #select the last wind_l number of prefix branches from the prefix list 
-        for idx, branch_id in enumerate(prefix[-wind_l:]): #for each prefix branch (we select wind_l num) to current branch
+        #CREATE padded prefix branch list (incl. direct parent branch/cur branch to children)
+        for idx, branch_id in enumerate(prefix[-wind_l:]): #for each prefix branch (we select at most wind_l num) to current branch (incl)
             branch = torch.from_numpy(self.branches[branch_id])
             branch_l = len(branch)
             padded_source[idx][:branch_l] = branch
-            real_wind_len += 1
+            real_wind_len += 1 #case for # prefix branch < wind_l (terminate loop early)
             seq_len.append(branch_l) #seq_len=list of branch len for selected prefix branches
 
         while len(seq_len) != wind_l:

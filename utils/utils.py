@@ -911,7 +911,7 @@ class Tree(object):
                     (curr.sons[1].data['leaf'], curr.sons[0].data['leaf'])
                 ])
         curr_prefix.pop()
-        return branch_id
+        return branch_id #current branch that was recursed on 
 
     def resort_tree(self):
         self.fetch_branch_seq()
