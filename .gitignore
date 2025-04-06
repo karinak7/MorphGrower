@@ -1,7 +1,2 @@
-./output/*
-./log/*
-/output/*
-/log/*
-/log_backup/*
 **/*output*/
-#testing 
+**/*log*/

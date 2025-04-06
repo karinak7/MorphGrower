@@ -3,6 +3,7 @@ import torch
 import random
 import scipy.sparse
 from utils.utils import resample_branch_by_step
+from utils.debug_config import DEBUG
 
 def fix_seed(seed):
     random.seed(seed)
@@ -115,20 +116,30 @@ def my_collate(data):
     real_wind_len = torch.stack([torch.tensor(data[i][3]) for i in range(len(data))], dim=0)
     seq_len = torch.stack([data[i][4] for i in range(len(data))], dim=0)
     target_len = torch.stack([data[i][5] for i in range(len(data))], dim=0)
+    if DEBUG:
+        print("[DEBUG] my_collate: padded_source.shape", padded_source.shape)
+        print("[DEBUG] my_collate: target_l.shape", target_l.shape)
+        print("[DEBUG] my_collate: target_r.shape", target_r.shape)
+        print("[DEBUG] my_collate: real_wind_len.shape", real_wind_len.shape)
+        print("[DEBUG] my_collate: seq_len.shape", seq_len.shape)
+        print("[DEBUG] my_collate: target_len.shape", target_len.shape)
 
     node = [data[i][6] for i in range(len(data))] #each data[i] is about same branch (batchsize, #branches per sample, L, 3)
     offset = []
     for i in range(len(data)):
-        offset += [i for j in range(len(data[i][6]))] # 1D array: for each branch in node (dim 2), record which data sample it belongs to 
+        offset += [i for j in range(len(data[i][6]))] # 1D array: for each branch in node, record which data sample it belongs to 
 
     if offset == []:
         offset = torch.tensor([])
-        print("[DEBUG] data_utils.py: if offset==[]")
+        #1 possible case this happens is if all the sampled branches in batch are soma branches -> [] in node
+        
+        if DEBUG: print("[DEBUG] data_utils.py: if offset==[]")
     elif offset[-1] != len(data) - 1:
+        # handles the case where the last sample didn’t contribute any node data
         offset.append(len(data) - 1)
         # node.append(torch.zeros((1, 16, 3))) 
         node.append(torch.zeros((1,32,3)))
-        print("[DEBUG] data_utils.py: else offset[-1]")
+        if DEBUG: print("[DEBUG] data_utils.py: else offset[-1]")
     # print("[DEBUG] data_utils.py: node", node)
     offset = torch.tensor(offset)
     node = torch.concat(node, dim=0) # (batch_size * # branches per sample, L,3)
@@ -149,6 +160,7 @@ def my_collate(data):
     else:
         _max = edge.max()
     shape = (int(_max + 1), edge.shape[0], edge.shape[1])
+    if DEBUG: print("[DEBUG] my_collate: shape for edge", shape)
     edge = torch.sparse_coo_tensor(torch.tensor(np.vstack([layer, row, col])).to(torch.long), torch.tensor(data), shape)
     return (padded_source, target_l, target_r, real_wind_len, seq_len, target_len, node, offset, edge)
 
@@ -205,6 +217,7 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         target_l = torch.ones(t_shape) * self.masking_element
         target_r = torch.ones(t_shape) * self.masking_element
         #real_wind_len = actual # prefix branches to current branch (incl cur)
+        #seq_len = len of each prefix branch selected for prefix list
         real_wind_len, seq_len = 0, []
         # prefix = prefix branches leading up to the children branches, targets = 2 children branches 
         prefix, targets, _ = self.dataset[index]
@@ -221,7 +234,7 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
             seq_len.append(0)
         seq_len = torch.LongTensor(seq_len)
         if self.resample:
-            #resample target branches to max_dst_length
+            #resample target branches to max_dst_length (i.e. num points on branch = max_dst_length)
             target_l = torch.from_numpy(self.resampled_branches[targets[0]]).to(torch.float32)
             target_r = torch.from_numpy(self.resampled_branches[targets[1]]).to(torch.float32)
             target_len = torch.tensor([self.max_dst_length, self.max_dst_length])
@@ -232,11 +245,10 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
             target_l[:target_len[0]] = torch.from_numpy(branch_l)
             target_r[:target_len[1]] = torch.from_numpy(branch_r)
 
-        new_index = prefix[-1] #last prefix branch
-        #it's possible that if index doesn't denote a soma branch then node and edge ds will be empty 
+        new_index = prefix[-1] #last prefix branch id (matching the current branch but != index position dataset aka index)
         # print("[DEBUG] self.trees[new_index]:", self.trees[new_index])
         # print("[DEBUG] self.trees[new_index][node]:", self.trees[new_index]["node"], "new_index:", new_index)
-        node = torch.from_numpy(self.trees[new_index]['node'])
+        node = torch.from_numpy(self.trees[new_index]['node']) #get previous branch nodes to current node
         node = node.to(torch.float32)
         # print("[DEBUG] data_utils.py: new_index, node.shape", new_index, node.shape)
         # if node.shape[0] == 0:

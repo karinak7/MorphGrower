@@ -130,6 +130,8 @@ if __name__ == '__main__':
             weight.pop('state2latent.bias')
             weight.pop('latent2state.weight')
             weight.pop('latent2state.bias')
+        for key, tensor in weight.items():
+            print(f"[SHAPE] {key}: {tensor.shape}")
         VAE.load_state_dict(weight,strict=False)
 
     if args.model_path != '':
