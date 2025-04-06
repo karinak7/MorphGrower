@@ -13,7 +13,7 @@ from utils.data_utils import fix_seed, load_weight, my_collate, tree_constructio
 from utils.utils import load_neurons
 from utils.log_utils import parse_train_args, create_log_dir
 from scripts.training import train_conditional_one_epoch, evaluateCVAE
-
+from tqdm import tqdm 
 
 def createDataset(neurons, neuron_files, args):
     branches, offsets, dataset, Tree = [],[],[],[]
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     best_ep, best_perf = None, None
     with open(log_file, 'w') as Fout:
         json.dump(log_info, Fout, indent=4)
-    for epoch in range(args.epochs):
+    for epoch in tqdm(range(args.epochs), desc='EPOCH'):
         print(f'[INFO] training on epoch {epoch}')
         train_recon_loss = train_conditional_one_epoch(
         train_loader, VAE, optimizer, reconstruction_loss, regression_loss,

@@ -2,4 +2,6 @@
 ./log/*
 /output/*
 /log/*
+/log_backup/*
+**/*output*/
 #testing 

@@ -181,7 +181,7 @@ def generate_a_tree(neuron, model, args, radius=0.2, type_=1):
         prefix, target_l, target_r, node, target_offset, edge = prefix.to(device), target_l.to(device), target_r.to(device), node.to(device), target_offset.to(device), edge.to(device)
 
         lf += 1
-        with torch.no_grad():
+        with torch.no_grad(): #inference
             output_l, output_r, h, Z = model(prefix,seq_len,window_len,target_l,target_r,target_seq_len,node,target_offset,edge, teacher_force=args.teaching, need_gauss=args.need_gauss)
             loss1 = reconstruction_loss(output_l, target_l) + reconstruction_loss(output_r, target_r)
             output_l = output_l[0].cpu()
@@ -308,14 +308,14 @@ if __name__ == '__main__':
     test_loss = get_losses_and_draw(log, axes[2],'test')
     plt.savefig(fig_path)
 
-    log['generate_loss'] = {'train':[],'test-valid':[]}
+    log['generate_loss'] = {'train':[],'test-valid':[], "test": []}
     if args.in_one_graph:
         for split in ['train','test-valid']:
             dir_name = os.path.join(out_dir, split, 'all')
             if not os.path.exists(dir_name):
                 os.makedirs(dir_name)
     else:
-        for split in ['train','test-valid']:
+        for split in ['train','test-valid', 'test']:
             dir_name = os.path.join(out_dir, split, args.projection_3d)
             if not os.path.exists(dir_name):
                 os.makedirs(dir_name)
@@ -349,6 +349,7 @@ if __name__ == '__main__':
                     ax.set_aspect('equal')
 
             if args.generate_layers == -1:
+                # do inference
                 new_neuron, std_neuron, generate_loss, generate_count, metric = generate_a_tree(
                     neu, VAE,
                     args
@@ -363,7 +364,11 @@ if __name__ == '__main__':
                     fig = plt.figure()
                     ax = plt.axes(projection='3d')
                     new_neuron.draw_3d(ax=ax)
-                    fig_name = "3d_"+log_reidx[idx].replace('.swc','.png')
+                    fig_name = "3d_"+log_reidx[idx].replace('.swc','.png').replace('.SWC', '.png')
+                    # print("[DEBUG] out_dir: ", out_dir)
+                    # print("[DEBUG] split: ", split)
+                    # print("[DEBUG] args.projection_3d: ", args.projection_3d)
+                    # print("[DEBUG] fig_name: ", fig_name)
                     fig_file = os.path.join(out_dir, split, args.projection_3d, fig_name)
                     plt.savefig(fig_file,bbox_inches='tight',format='png')
                     fig_file = fig_file.replace('png','pdf')
@@ -398,7 +403,7 @@ if __name__ == '__main__':
                     plt.tick_params(top=False, bottom=False, left=False, right=False,labelleft=False, labelbottom=False)
                     axes.set_aspect('equal', adjustable='box')
                     new_neuron.draw_2d(ax=axes, projection=projection)
-                    fig_name = neuron_file.replace('.swc','_generated.png')
+                    fig_name = neuron_file.replace('.swc','_generated.png').replace('.SWC','_generated.png')
                     fig_file = os.path.join(out_dir, split, projection, fig_name)
                     plt.axis('square')
                     plt.savefig(fig_file,bbox_inches='tight',format='png')
@@ -439,7 +444,9 @@ if __name__ == '__main__':
                 log['generate_loss'][split].append({'idx':_+1,'loss':total_loss/total_count})
                 with open(log_file, 'w') as Fout:
                     json.dump(log, Fout, indent=4)
-
+            # print("[DEBUG] log['generate_loss']:", log['generate_loss'])
+            # print("[DEBUG] list(log.items())", list(log.items()))
+            # exit(0)
         if (len(data_split))%10!=0 and total_count>0:
             log['generate_loss'][split].append({'idx':len(data_split),'loss':total_loss/total_count})
             with open(log_file, 'w') as Fout:

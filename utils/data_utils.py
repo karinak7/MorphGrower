@@ -238,8 +238,8 @@ class ConditionalPrefixSeqDataset(torch.utils.data.Dataset):
         node = torch.from_numpy(self.trees[new_index]['node'])
         node = node.to(torch.float32)
         # print("[DEBUG] data_utils.py: new_index, node.shape", new_index, node.shape)
-        if node.shape[0] == 0:
-            print("[DEBUG] data_utils new_index, node (soma branch):", new_index, node)
+        # if node.shape[0] == 0:
+        #     print("[DEBUG] data_utils new_index, node (soma branch):", new_index, node)
         edge = self.trees[new_index]['edge']
         
         #target_len = [len(left child branch), len(right child)]

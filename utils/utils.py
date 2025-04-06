@@ -1167,7 +1167,7 @@ class Tree(object):
                 v[:, x].T + x_offset,
                 v[:, y].T + y_offset,
                 v[:, z].T + z_offset,
-                c=axon_color, linewidth=1.0, **kwargs
+                c=color, linewidth=1.0, **kwargs
             )
         '''
         for pcolor in colors:
@@ -1182,9 +1182,9 @@ class Tree(object):
                 )
         '''
 
-        # ax.set_xlabel(projection[0].capitalize() + r'($\mu m$)')
-        # ax.set_ylabel(projection[1].capitalize() + r'($\mu m$)')
-        # ax.set_zlabel(projection[2].capitalize() + r'($\mu m$)')
+        ax.set_xlabel(projection[0].capitalize() + r'($\mu m$)')
+        ax.set_ylabel(projection[1].capitalize() + r'($\mu m$)')
+        ax.set_zlabel(projection[2].capitalize() + r'($\mu m$)')
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
         return fig, ax
