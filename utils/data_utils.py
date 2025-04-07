@@ -21,7 +21,7 @@ def edge_calculation(dataset, size=256):
     cols = []
     data = []
     for i in range(len(dataset)):
-        for j in range(len(dataset[i][1])): #for ith branch and its prefix branches (self incl)
+        for j in range(len(dataset[i][1])): #for 2 children of ith branch
             rows.append(dataset[i][1][j])
             cols.append(dataset[i][0][-1])
             data.append(len(dataset[i][0]))
@@ -60,14 +60,14 @@ def tree_construction(branches, dataset, layer, nodes):
     tree = []
     for i in range(len(branches)):
         node = branches[pre_node[i]] # find all branches that are in previous layers & share same soma branch as branch i
-        #build an adjacency matrix: size: num_branches x num_branches (tree graph rep)
+        #build an adjacency matrix for previous branches to branch i: size: num_prev_branch x num_prev_branch
         m, n = np.ix_(pre_node[i], pre_node[i])
         #convert into coordinate sparse format: efficient use in PyTorch sparse tensors and for passing into a T-GNN
         edge = e[m, n].tocoo() 
         # a tree of subtrees (a forest of trees for each soma branch): 
         # node is a subtree i.e. list of nodes (branches), edge = adjacency matrix of that subtree 
         tree.append({'edge': edge, 'node': node})
-    print("[CHECK] tree[-1]['node']", tree[-1]['node']) #expect [no.prev.branches x L x 3]
+    # print("[CHECK] tree[-1]['node']", tree[-1]['node']) #expect [no.prev.branches x L x 3]
     return tree
 
 def my_collate(data):
@@ -149,18 +149,22 @@ def my_collate(data):
     # [   0      0      edge_2   ]
     # no interaction across different samples (each sample is a branch, and the subtrees rooted at the branch if it is a soma branch) 
     edge = scipy.sparse.block_diag(mats=[data[j][7] for j in range(len(data))]) #(total_nodes x total_nodes)
-    layer = edge.data #value of non-zero elems in edge sparse matrix
-    row = edge.row #row index of corresponding value in edge sparse matrix 
+    layer = edge.data #value of non-zero elems in edge sparse matrix = depth(child_br)
+    row = edge.row #row index of non-zero elem = child_br 
     col = edge.col #col index ... 
+    if DEBUG:
+        print("[DEBUG] my_collate: edge.shape:", edge.shape)
+        print("[DEBUG] my_collate: layer.shape:", layer.shape)
+        print("[DEBUG] my_collate: row.shape:", row.shape)
+        print("[DEBUG] my_collate: col.shape:", col.shape)
     #so at index i we have: edge[row[i], col[i]] has value == layer[i]
-    #just marking connection here - actual edge connection vals understand edge_calculation
-    data = np.ones(layer.shape) #data var got renamed 
+    data = np.ones(layer.shape) #data var got renamed, layer.shape == row.shape == col.shape
     if edge.shape[0] == 0 or edge.shape[1] == 0:
         _max = 0
     else:
         _max = edge.max()
     shape = (int(_max + 1), edge.shape[0], edge.shape[1])
-    if DEBUG: print("[DEBUG] my_collate: shape for edge", shape)
+    if DEBUG: print("[DEBUG] my_collate: shape for edge after adjust", shape)
     edge = torch.sparse_coo_tensor(torch.tensor(np.vstack([layer, row, col])).to(torch.long), torch.tensor(data), shape)
     return (padded_source, target_l, target_r, real_wind_len, seq_len, target_len, node, offset, edge)
 
