@@ -1,7 +1,7 @@
 import torch
 import random
 from torch.nn.utils.rnn import pack_padded_sequence
-
+from utils.debug_config import DEBUG
 
 def reconstruction_loss(reconstructed_x, x, ignore_element=0):
     # reconstruction loss
@@ -179,7 +179,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         self.device = device
         self.encoder = encoder.to(device)
         self.decoder = decoder.to(device)
-        self.distribution = distribution
+        self.distribution = distribution #vMF passed in 
         self.new_model = new_model
         if new_model:
             self.condition_encoder = ConditionEncoder(self.encoder, self.encoder.hidden_dim, self.encoder.n_layers, dropout=dropout)
@@ -188,6 +188,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         #                       + (1 - forgettable) * raw_embedding[w-1]
         self.forgettable = forgettable if forgettable != 0 else None
 
+        #ablation
         print("**************************************")
         print(remove_global, remove_path)
         print("**************************************")
@@ -197,18 +198,30 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         self.remove_global = remove_global
         self.remove_path = remove_path
 
+        #prior distribution? 
         mean = torch.full([1,encoder.hidden_dim],0.0)
         std = torch.full([1,encoder.hidden_dim],1.0)
         self.gauss = torch.distributions.Normal(mean, std)
 
+        #obtain conditioned feature rep via concat & linear projection
+        
+        #encoder state -> Latent z 
+        # encoder.hidden_dim * encoder.n_layers * 6  = CONCAT[r_b1, r_b2, h_local] 
+        #r_bn = encoder.hidden_dim * 2 * encoder.n_layers (*2 = pair of hidden and cell states)
+        # h_local = encoder.hidden_dim * 2 * encoder.n_layers (EMA of branch reps each of same dim: encoder.hidden_dim * 2 * encoder.n_layers)
         self.state2latent = torch.nn.Linear(
             encoder.hidden_dim * encoder.n_layers * 6 + self.global_dim,
             distribution.lat_dim
         )
+
+        #latent z -> left branch feature rep 
+        # input dim = CONCAT[z, h_local, h_global]
+        # output dim = pairs of hidden and cell states across n_layers of decoder LSTM. CONCAT[h, c]*encoder.n_layers
         self.latent2state_l = torch.nn.Linear(
             distribution.lat_dim + encoder.hidden_dim * encoder.n_layers * 2 + self.global_dim,
             decoder.hidden_dim * decoder.n_layers * 2
         )
+        #latent z -> right branch feature rep
         self.latent2state_r = torch.nn.Linear(
             distribution.lat_dim + encoder.hidden_dim * encoder.n_layers * 2 + self.global_dim,
             decoder.hidden_dim * decoder.n_layers * 2
@@ -220,9 +233,19 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
 
     def encode(self, src_l, seq_len_l, src_r, seq_len_r, h_path, h_global):
         hidden_l, cell_l = self.encoder(src_l, seq_len_l)
+        """
+        encode logic: 
+        1.for left and right ref branches:
+            encode branch with LSTM and  hidden & cell state -> encoded state 
+        2.Concat ref branch encoding with h_local=h_path and h_global -> conditional state
+        -> linear projection -> h
+        3. create vMF distribution with h as mean 
+        4. sample latent variables Z via avg. of 5 rejection sampling results 
+        """
+        hidden_l, cell_l = self.encoder(src_l, seq_len_l)
         n_layers, batch_size, hid_dim = hidden_l.shape
         states_l = torch.cat((hidden_l, cell_l), dim=0)
-        # result states = [bs, 2*n_layers*hidden_dim]
+        # result states = [bs, 2*n_layers*hidden_dim] - group state by batch
         states_l = states_l.permute(1, 0, 2).reshape(batch_size, -1)
 
         hidden_r, cell_r = self.encoder(src_r, seq_len_r)
@@ -237,6 +260,11 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         tup, kld, vecs = self.distribution.build_bow_rep(h, n_sample=5)
         Z = torch.mean(vecs, dim=0)
         condition = h_global
+        if DEBUG: 
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: h.shape {h.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: Z.shape {Z.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: condition.shape {condition.shape}")
+        #vMF mean, sampled latent variables, h_global 
         return h, Z, condition
 
     def _get_decoder_states(self, latent, batch_size, h_path, h_global, decode_left):
