@@ -244,9 +244,21 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         """
         hidden_l, cell_l = self.encoder(src_l, seq_len_l)
         n_layers, batch_size, hid_dim = hidden_l.shape
-        states_l = torch.cat((hidden_l, cell_l), dim=0)
+        states_l = torch.cat((hidden_l, cell_l), dim=0) #[2*n_layers, bs, h_dim] = [4, 256, 64]
+
+        if DEBUG: 
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: src_l.shape {src_l.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: seq_len_l.shape {seq_len_l.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: hidden_l.shape {hidden_l.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: cell_l.shape {cell_l.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: states_l.shape {states_l.shape}")
+            print(f"[TENSOR] model: ConditionalSeq2SeqVAE.encode: states_l {states_l}")
         # result states = [bs, 2*n_layers*hidden_dim] - group state by batch
+        # [bs, infer rest of size into 1 dim] = [bs, 2*n_layers*hidden_dim] = [256, 256]
         states_l = states_l.permute(1, 0, 2).reshape(batch_size, -1)
+        if DEBUG: 
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: states_l.shape {states_l.shape}")
+            print(f"[TENSOR] model: ConditionalSeq2SeqVAE.encode: states_l {states_l}")
 
         hidden_r, cell_r = self.encoder(src_r, seq_len_r)
         states_r = torch.cat((hidden_r, cell_r), dim=0)
