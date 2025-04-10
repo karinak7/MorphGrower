@@ -3,5 +3,5 @@
 from utils import smooth_swc
 
 
-smooth_swc("/media/chupeng/PortableSSD/dataset/excitatory/swc", 
-           "/media/chupeng/PortableSSD/dataset/excitatory/preprocessed")
+smooth_swc("/home/chupeng/Desktop/karina/MorphGrower/dataset/smalltest/swc", 
+           "/home/chupeng/Desktop/karina/MorphGrower/dataset/smalltest/preprocessed")

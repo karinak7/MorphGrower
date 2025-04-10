@@ -61,7 +61,7 @@ class ConditionalSeqEncoder(torch.nn.Module):
         )
         #seq_len: Each value tells the actual number of valid timesteps for each branch
         #packed_seq: give LSTM a batch seqs, and tells it their real length before padding so lstm can handle efficiently
-        #seq len corresponds to length of each column in input_seq which represents a branch 
+        #seq len corresponds to length of each column in input_seq which represents a branch sample
         packed_output, (hidden, cell) = self.rnn(packed_seq)
 
         # outputs = [seq len, batch size, hid dim * n directions]
@@ -359,7 +359,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         if DEBUG:
             print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: hidden_seq.shape", hidden_seq.shape)
         
-        #get local context embedding: h_local = h_path
+        #h_local = h_path encoding 
         # pooling to get h_path = [bs, n_layers*2*hidden_dim]
         if self.remove_path:
             h_path = torch.zeros([batch_size, hidden_seq.shape[0] * hidden_seq.shape[2]]).to(self.device)
@@ -394,26 +394,36 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
                 h_path = torch.stack(h_path).reshape(batch_size, -1)
                 if DEBUG:
                     print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_path.shape:", h_path.shape)
+        # h_global encoding
         if self.remove_global:
             h_global = torch.zeros([batch_size, self.global_dim]).to(self.device)
         else:
+            #offset: idx of data sample the corresponding prev branch in node belongs to 
             if offset.shape[0] == 0:
                 #empty tree
                 h_global = torch.zeros([batch_size, self.global_dim]).to(self.device)
             else:
-                # node (before permute): [total_nodes, L, 3] 
-                #node after permute: [L, total_nodes, 3]
-                node = node.permute(1, 0, 2)
+                #branch encoding for previous branches (nodes)
+                # node (before permute): [total_nodes, L, 3], total_nodes = total_no_prev_br
+                node = node.permute(1, 0, 2) #[L, total_nodes, 3]
                 #assume every branch is the same length, there are node.shape[1] number of branches in the batch
-                node_len = target_l_seq_len[0] * torch.ones(node.shape[1])
-                #hidden, cell: [n_layers, total_nodes, hidden_dim]
+                node_len = target_l_seq_len[0] * torch.ones(node.shape[1]) # [total_nodes] i.e. a list of prev branch lens
+                #hidden, cell: [n_layers, total_nodes, hidden_dim] = [2, *, 64]
                 hidden, cell = self.encoder(node, node_len)
-                node = torch.cat((hidden, cell), dim=0)
-                #branch encoding for each node (branch in node): [total_nodes, 2 * n_layers * hidden_dim]
-                node = node.permute(1, 0, 2).reshape(hidden.shape[1], -1)
-                # node: [N*32*3]
+                node = torch.cat((hidden, cell), dim=0) # [2*n_layers, total_nodes, hidden_dim] = [4, *, 64]
+                if DEBUG:
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode h_global: hidden.shape:", hidden.shape)
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global: cell.shape:", cell.shape)
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global: node_len.shape:", node_len.shape)
+                    
+                #branch encoding for each node after permute: [total_nodes, 2 * n_layers, hidden_dim]
+                node = node.permute(1, 0, 2).reshape(hidden.shape[1], -1) # [total_nodes, 2*n_layers*hidden_dim] = [*, 256]
+                if DEBUG:
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global: node.shape:", node.shape)
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global: edge.shape:", edge.shape)
+                # node: [total_nodes, 2*n_layers*hidden] = [total_nodes, 256]
                 #offset: [total_nodes]: map node to sample in batch
-                # edge: [D, total_nodes, total_nodes] (sparse)
+                # edge: [_max+1, total_nodes, total_nodes] (sparse): max = max depth of any branch in node
                 h_global = self.tgnn(node, offset, edge)
 
 
@@ -424,6 +434,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
             Z = self.gauss.sample().to(self.device)
             Z = Z / torch.norm(Z)
         else:
+            #VAE encoder logic 
             h, Z, condition = self.encode(target_l, target_l_seq_len, target_r, target_r_seq_len, h_path, h_global)
         hidden, cell = self._get_decoder_states(Z, batch_size, h_path, h_global, True)
 

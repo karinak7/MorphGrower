@@ -14,6 +14,7 @@ from utils.utils import load_neurons
 from utils.log_utils import parse_train_args, create_log_dir
 from scripts.training import train_conditional_one_epoch, evaluateCVAE
 from tqdm import tqdm 
+from utils.debug_config import DEBUG
 
 def createDataset(neurons, neuron_files, args):
     branches, offsets, dataset, Tree = [],[],[],[]
@@ -122,6 +123,7 @@ if __name__ == '__main__':
         VAE = ConditionalSeq2SeqVAE(encoder, decoder, distribution, tgnn, device=device,forgettable=args.forgettable, remove_global=args.remove_global=='True', remove_path=args.remove_path=='True', new_model=args.new_model)
         VAE.to(device)
 
+    if DEBUG: print(f"[DEBUG] args.pretrained_path {args.pretrained_path}")
     if args.pretrained_path != None:
         weight = torch.load(args.pretrained_path, map_location=device)
         weight = weight['VAE']
@@ -130,8 +132,9 @@ if __name__ == '__main__':
             weight.pop('state2latent.bias')
             weight.pop('latent2state.weight')
             weight.pop('latent2state.bias')
-        for key, tensor in weight.items():
-            print(f"[SHAPE] torch.load(args.pretrained_path) {key}: {tensor.shape}")
+        if DEBUG:
+            for key, tensor in weight.items():
+                print(f"[SHAPE] torch.load(args.pretrained_path) {key}: {tensor.shape}")
         VAE.load_state_dict(weight,strict=False)
 
     if args.model_path != '':
