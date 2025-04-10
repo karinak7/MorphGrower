@@ -15,6 +15,8 @@ class TGNNconv(MessagePassing):
         """
         x: [no_nodes, 2*n_layers*hidden_dim] = [no_nodes, 256]
         edge_index: [D, no_nodes, no_nodes]
+
+        * ith node in x = ith node in edge_matrix
         """
         # x has shape [N, in_channels]
         # edge_index has shape [layer, 2, E[layer]]
