@@ -241,6 +241,11 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         -> linear projection -> h
         3. create vMF distribution with h as mean 
         4. sample latent variables Z via avg. of 5 rejection sampling results 
+
+        Paper section: 
+        #μ = W · CONCAT[rb1 , rb2 , hglobal, hlocal]
+        # zi ∼ vMF(μ, κ)
+        # Z=avg(5 samples of z)
         """
         hidden_l, cell_l = self.encoder(src_l, seq_len_l)
         n_layers, batch_size, hid_dim = hidden_l.shape
@@ -252,13 +257,14 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
             print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: hidden_l.shape {hidden_l.shape}")
             print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: cell_l.shape {cell_l.shape}")
             print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: states_l.shape {states_l.shape}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: h_path.shape {h_path.shape}")
             print(f"[TENSOR] model: ConditionalSeq2SeqVAE.encode: states_l {states_l}")
         # result states = [bs, 2*n_layers*hidden_dim] - group state by batch
         # [bs, infer rest of size into 1 dim] = [bs, 2*n_layers*hidden_dim] = [256, 256]
         states_l = states_l.permute(1, 0, 2).reshape(batch_size, -1)
         if DEBUG: 
-            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: states_l.shape {states_l.shape}")
-            print(f"[TENSOR] model: ConditionalSeq2SeqVAE.encode: states_l {states_l}")
+            print(f"[SHAPE] model: ConditionalSeq2SeqVAE.encode: states_l.shape after reshape {states_l.shape}")
+            print(f"[TENSOR] model: ConditionalSeq2SeqVAE.encode: states_l after reshape {states_l}")
 
         hidden_r, cell_r = self.encoder(src_r, seq_len_r)
         states_r = torch.cat((hidden_r, cell_r), dim=0)
@@ -268,7 +274,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         # 拼接上 h_path
         # 拼接上TGN output h_global，shape = [bs,self.global_dim]
         states = torch.cat((states_l, states_r, h_path, h_global), dim=1)
-        h = self.state2latent(states)
+        h = self.state2latent(states) 
         tup, kld, vecs = self.distribution.build_bow_rep(h, n_sample=5)
         Z = torch.mean(vecs, dim=0)
         condition = h_global
@@ -299,8 +305,11 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
     def forward(self, prefix, seq_len, window_len, target_l, target_r, target_seq_len, node, offset, edge,
                 teacher_force=0.5, need_gauss=False):
         """
-        Each sample in the batch corresponds to one training example,
-        which is a branch bifurcation (i.e., one parent + two child branches)
+        seq_len: [bs, max_widnow_len] = [256, 4]
+        prefix: [bs, max_window_len, max_src_length, data_dim] = [256, 4, 32, 3]
+        
+        all_seq_len: [bs, total_num_prefix_br, ]
+        all_seq: [total_num_prefix_br]
         """
         # prefix = [bs, max window len, max seq len, data dim]
         # seq_len = [bs, max window len] -> stores len of each prefix branch per batch branch (max window len no. of prefix branches per branch)
@@ -317,24 +326,39 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         # window_len: (batch x 1): each batch dim holds an int of window len
         for idx, t in enumerate(window_len): #for each branch sample, extarct window_len no. of prefix branches
             #t = num of preix branches to consider per branch in a batch dim
-            #idx = batch dim 
+            #idx = batch dim (sample id)
             all_seq_len.extend(seq_len[idx][:t]) 
             all_seq.append(prefix[idx][:t])
-        
+        if DEBUG:
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode:torch.unique(window_len) find all vals in wind_len", torch.unique(window_len)) #elems val <= 4
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: seq_len.shape ", seq_len.shape) 
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: prefix.shape ", prefix.shape) 
+            # print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: all_seq_len ", all_seq_len) 
+            # print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: all_seq ", all_seq) 
+          
         #all_seq_len = [batch * window_len]: 1D list of all branch lengths for prefix branches across batch
         #before permute:  all_seq =  [batch*t, seq_len, 3] all prefix branches 
         # all_seq = [max seq len, sum(window_len), data dim] after permute
             #sum(window_len) = sum of all the window_len in the batch i.e. batch*t assuming uniform window_len
             # max seq len = seq_len 
             #all_seq[i,:,:] gives the 3D coordinates of all the ith point on each prefix branch in the batch
-            # all_seq[i,:,:] contains info about all branches 
-        all_seq = torch.cat(all_seq, dim=0).permute(1, 0, 2)
+
+        all_seq = torch.cat(all_seq, dim=0).permute(1, 0, 2) # [max_src_length, total_prefix_no, data_dim] = [32, *, 3]
+        if DEBUG:
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: all_seq.shape ", all_seq.shape) 
+
+        #all_seq_len: [total_prefix_no]; all_seq: [max_src_length, total_prefix_no, data_dim] 
         hiddens, cells = self.encoder(all_seq, all_seq_len) 
+        #hiddens, cells: [no.layers, total_prefix_no, hidden_dim] = [2, * 64]
+        if DEBUG:
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: hiddens.shape", hiddens.shape)
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: cells.shape", cells.shape)
 
-        #hidden_seq: [n_layers * n_directions, batch_size, hidden_dim * 2] = [2, batch_size, hidden_dim * 2]
-        #encoded rep for each single branch in the batch (r_b)
-        hidden_seq = torch.cat([hiddens, cells], dim=-1) 
-
+        #encoded rep for every prefix branches (of each sample in the batch)
+        hidden_seq = torch.cat([hiddens, cells], dim=-1) #[no.layers, total_prefix_no, hidden_dim*2] = [2, *, 128]
+        if DEBUG:
+            print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: hidden_seq.shape", hidden_seq.shape)
+        
         #get local context embedding: h_local = h_path
         # pooling to get h_path = [bs, n_layers*2*hidden_dim]
         if self.remove_path:
@@ -351,24 +375,25 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
                 h_path = h_path.permute(1, 0, 2).reshape(batch_size, -1)
             else:
                 h_path = []
-                pre_cnt = 0
+                pre_cnt = 0 # controls which set of prefixes corresponds to which sample
                 #use EMA (method in paper)
                 def compress_path_embedding(y, forgettable, device):
-                    if forgettable == None:
-                        return torch.mean(y, 1)
-                    else:
+                    if forgettable == None: #mean pooling 
+                        return torch.mean(y, 1) #single h_path: [no_layers, hidden_dim*2] = [2, 128]
+                    else: #EMA eqn 
                         h = torch.zeros(y.shape[0], y.shape[2]).to(device)
-                        for i in range(y.shape[1]):
+                        for i in range(y.shape[1]): #y.shape[1] deals with a branch 
                             h = forgettable * h + (1 - forgettable) * y[:, i, :]
                         return h
 
-                for _, wl in enumerate(window_len):
+                for _, wl in enumerate(window_len): #loop ensures final len(h_path) = bs
                     h_path.append(
                         compress_path_embedding(hidden_seq[:, pre_cnt:pre_cnt + wl, :], self.forgettable, self.device))
                     pre_cnt += wl
-                #h_path: [batch_size, n_layers * 2 * hidden_dim] = [batch_size, 256]
+                #h_path: [bs, no_layers * hidden_dim*2] = [bs, 2 * hidden_dim*2] = [256, 256]
                 h_path = torch.stack(h_path).reshape(batch_size, -1)
-
+                if DEBUG:
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_path.shape:", h_path.shape)
         if self.remove_global:
             h_global = torch.zeros([batch_size, self.global_dim]).to(self.device)
         else:
@@ -392,7 +417,7 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
                 h_global = self.tgnn(node, offset, edge)
 
 
-        target_l = target_l.permute(1, 0, 2)
+        target_l = target_l.permute(1, 0, 2) #move batch dim to second dim, group by 1st coord etc. 
         target_r = target_r.permute(1, 0, 2)
         if need_gauss:
             h = 0
@@ -408,8 +433,10 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
             self.decoder, (target_len, batch_size, output_dim),
             target_l[0], hidden, cell, self.device,
             teacher_force=teacher_force, target=target_l
-        )
-        output_l = output_l.permute(1, 0, 2)
+        ) #[max_dst_len, bs, data_dim] = [32, 256, 3]
+        if DEBUG: print(f"[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: output_l.shape: {output_l.shape}")
+        output_l = output_l.permute(1, 0, 2) #move bs to dim0, [bs, max_dst_len, data_dim]
+        if DEBUG: print(f"[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: output_l.permute(1, 0, 2).shape: {output_l.shape}")
 
         hidden, cell = self._get_decoder_states(Z, batch_size, h_path, h_global, False)
 
