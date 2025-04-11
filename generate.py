@@ -333,7 +333,7 @@ if __name__ == '__main__':
         if args.short!=None:
             data_split = data_split[:args.short]
         for _,idx in enumerate(tqdm(data_split)):
-            neu = neurons[reidx[log_reidx[idx]]]
+            neu = neurons[reidx[log_reidx[idx]]] #LOOK
             print(log_reidx[idx])
             neu = deepcopy(neurons[idx])
             if args.in_one_graph:
@@ -349,7 +349,7 @@ if __name__ == '__main__':
                     ax.set_aspect('equal')
 
             if args.generate_layers == -1:
-                # do inference
+                # do inference #LOOK
                 new_neuron, std_neuron, generate_loss, generate_count, metric = generate_a_tree(
                     neu, VAE,
                     args

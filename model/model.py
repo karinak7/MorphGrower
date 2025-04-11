@@ -289,17 +289,24 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
         # cat latent with h_path and h_global
         h = torch.cat((latent, h_path, h_global), dim=1)
         if decode_left:
-            decoder_states = self.latent2state_l(h).reshape(batch_size, -1, 2)
+            decoder_states = self.latent2state_l(h).reshape(batch_size, -1, 2) #[bs, 2*hidden_dim, n_layers]
         else:
             decoder_states = self.latent2state_r(h).reshape(batch_size, -1, 2)
         hidden_shape = (
             batch_size, self.decoder.hidden_dim, self.decoder.n_layers
-        )
-        hidden = decoder_states[:, :, 0].reshape(*hidden_shape)
-        hidden = hidden.permute(2, 0, 1).contiguous()
+        ) #[bs, hidden_dim, n_layers] = [256, 64, 2]
+        if DEBUG:
+            print(f"f[SHAPE] model: ConditionalSeq2SeqVAE._get_decoder_states: decoder_states.shape {decoder_states.shape}")
+            print(f"f[SHAPE] model: ConditionalSeq2SeqVAE._get_decoder_states: hidden_shape {hidden_shape}")
+
+        hidden = decoder_states[:, :, 0].reshape(*hidden_shape) #256, 64, 2
+        hidden = hidden.permute(2, 0, 1).contiguous() #[2, 256, 64] [n_layers, bs, hidden_dim]
 
         cell = decoder_states[:, :, 1].reshape(*hidden_shape)
-        cell = cell.permute(2, 0, 1).contiguous()
+        cell = cell.permute(2, 0, 1).contiguous() #[n_layers, bs, hidden_dim]
+        if DEBUG:
+            print(f"f[SHAPE] model: ConditionalSeq2SeqVAE._get_decoder_states: hidden.shape {hidden.shape}")
+            print(f"f[SHAPE] model: ConditionalSeq2SeqVAE._get_decoder_states: cell.shape {cell.shape}")
         return hidden, cell
 
     def forward(self, prefix, seq_len, window_len, target_l, target_r, target_seq_len, node, offset, edge,
@@ -425,7 +432,9 @@ class ConditionalSeq2SeqVAE(torch.nn.Module):
                 #offset: [total_nodes]: map node to sample in batch
                 # edge: [_max+1, total_nodes, total_nodes] (sparse): max = max depth of any branch in node
                 h_global = self.tgnn(node, offset, edge)
-
+                if DEBUG:
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global: h_global.shape:", h_global.shape)
+                    print("[DEBUG] model.py: ConditionalSeq2SeqVAE.encode: h_global : self.global_dim", self.global_dim)
 
         target_l = target_l.permute(1, 0, 2) #move batch dim to second dim, group by 1st coord etc. 
         target_r = target_r.permute(1, 0, 2)

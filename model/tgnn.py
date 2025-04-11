@@ -84,8 +84,13 @@ class TGNN(torch.nn.Module):
         # x is [N, 256], edge is [D,N,N]
         if len(x.shape) == 1:
             x = x.unsqueeze(dim=0)
-        if DEBUG: print(f"[DEBUG] TGNN.forward: x.shape: {x.shape}")
         e1 = self.conv1(x, edge)
         e2 = self.conv2(e1, edge)
         out = global_mean_pool(e2, offset)
+        if DEBUG: 
+            print(f"[DEBUG] TGNN.forward: x.shape: {x.shape}")
+            print(f"[DEBUG] TGNN.forward: offset.unique(): {offset.unique()}")
+            print(f"[DEBUG] TGNN.forward: out.shape: {out.shape}")
+
+
         return out
